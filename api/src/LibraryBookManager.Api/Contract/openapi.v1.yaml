@@ -1,0 +1,501 @@
+openapi: 3.1.1
+info:
+  title: Library Book Manager API
+  version: 1.0.0
+  description: >-
+    External REST contract of the Library Book Manager (book-manager-01), major version 1.
+    Every route is under /v1; a breaking change introduces /v2 rather than altering this document
+    (plt-api-001 REQ-API-003). Served over HTTPS only (org-sec-004 REQ-SEC-011).
+servers:
+  - url: https://library.example.invalid
+    description: Placeholder; the production host name is not specified (QUESTIONS.md).
+security:
+  - session: []
+tags:
+  - name: Catalogue
+    description: Capability BOOK — titles and copies.
+  - name: Identity
+    description: Capability AUTH — sessions, users and roles.
+  - name: Lending
+    description: >-
+      Capability LEND — checkout, return and loans. "The day" is the library's calendar day in its
+      configured time zone. The areas the LEND specification declares unspecified are deliberately
+      not part of this contract.
+paths:
+  /v1/loans:
+    post:
+      tags: [Lending]
+      operationId: checkOut
+      summary: Check out a copy to a member, due 21 days later (librarian; REQ-LEND-001..003).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [barcode, memberId]
+              properties:
+                barcode: { type: string }
+                memberId: { type: string, format: uuid }
+      responses:
+        '201':
+          description: The new loan.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Loan' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: COPY_NOT_FOUND (never in the catalogue, or removed) or USER_NOT_FOUND
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: COPY_ON_LOAN, BORROWER_NOT_A_MEMBER, MEMBER_HAS_OVERDUE_LOAN or LOAN_LIMIT_REACHED (ten open loans)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    get:
+      tags: [Lending]
+      operationId: lendingReport
+      summary: Every copy currently lent out, and to whom (librarian; REQ-LEND-007).
+      responses:
+        '200':
+          description: Open loans, by due date then barcode. Not paged.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Loan' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /v1/copies/{barcode}/return:
+    parameters:
+      - { name: barcode, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [Lending]
+      operationId: returnCopy
+      summary: Return a copy on loan; the loan closes today (librarian; REQ-LEND-004).
+      responses:
+        '200':
+          description: The closed loan, with returnedLate set if it came back after its due date.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Loan' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: COPY_NOT_ON_LOAN
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /v1/members:
+    get:
+      tags: [Lending]
+      operationId: findMember
+      summary: Find a member by exact email (librarian).
+      parameters:
+        - { name: email, in: query, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: The member with that email, or an empty list. Only users whose role is member are found.
+          content:
+            application/json:
+              schema:
+                type: array
+                maxItems: 1
+                items: { $ref: '#/components/schemas/Member' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /v1/members/{memberId}/loans:
+    parameters:
+      - { name: memberId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [Lending]
+      operationId: memberLoans
+      summary: A member's current loans (the member themselves, or a librarian; REQ-LEND-006).
+      responses:
+        '200':
+          description: Open loans, by due date then barcode.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Loan' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: USER_NOT_FOUND (librarians only; anyone else gets 403)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /v1/sessions:
+    post:
+      tags: [Identity]
+      operationId: signIn
+      summary: Sign in with email and password (REQ-AUTH-001, REQ-AUTH-003).
+      description: >-
+        A wrong password and an email with no account get the identical INVALID_CREDENTIALS response.
+        Five consecutive failures for one email lock it for 15 minutes (ACCOUNT_LOCKED), whether or not
+        an account exists.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Credentials' }
+      responses:
+        '201':
+          description: "A new session. The token is shown only here; send it as `Authorization: Bearer <token>`."
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Session' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401':
+          description: INVALID_CREDENTIALS or ACCOUNT_LOCKED
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /v1/sessions/current:
+    delete:
+      tags: [Identity]
+      operationId: signOut
+      summary: End the session this request carries (REQ-AUTH-005).
+      responses:
+        '204': { description: Signed out. The token is no longer accepted (SESSION_INVALID). }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+  /v1/users/me:
+    get:
+      tags: [Identity]
+      operationId: getCurrentUser
+      summary: The user the session belongs to.
+      responses:
+        '200':
+          description: The signed-in user.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+  /v1/users:
+    get:
+      tags: [Identity]
+      operationId: listUsers
+      summary: Every user and their role (administrator).
+      responses:
+        '200':
+          description: Users, ordered by email.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /v1/users/{userId}/role:
+    parameters:
+      - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
+    put:
+      tags: [Identity]
+      operationId: changeRole
+      summary: Change another user's role (administrator; REQ-AUTH-004). Administrators cannot change their own.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role: { $ref: '#/components/schemas/Role' }
+      responses:
+        '200':
+          description: The user with their role now.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: USER_NOT_FOUND
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /v1/titles:
+    get:
+      tags: [Catalogue]
+      operationId: searchTitles
+      summary: Search the catalogue by exactly one of title, author or ISBN (REQ-BOOK-005, REQ-BOOK-006).
+      description: >-
+        Title and author match case-insensitively on any part of the field; ISBN matches exactly after
+        removing hyphens and spaces. Results are ordered by title then ISBN, 50 to a page.
+      parameters:
+        - { name: title, in: query, required: false, schema: { type: string } }
+        - { name: author, in: query, required: false, schema: { type: string } }
+        - { name: isbn, in: query, required: false, schema: { type: string } }
+        - name: page
+          in: query
+          required: false
+          description: 1-based page number. Defaults to 1.
+          schema: { type: integer, minimum: 1, default: 1 }
+      responses:
+        '200':
+          description: A page of matches and the total number of matches.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SearchPage' }
+        '400': { $ref: '#/components/responses/InvalidSearch' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+    post:
+      tags: [Catalogue]
+      operationId: addTitle
+      summary: Add a title to the catalogue (librarian; REQ-BOOK-001).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NewTitle' }
+      responses:
+        '201':
+          description: The title, with zero copies.
+          headers:
+            Location:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Title' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: ISBN_ALREADY_EXISTS
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /v1/titles/{isbn}:
+    parameters:
+      - { name: isbn, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [Catalogue]
+      operationId: getTitle
+      summary: A title with its copies (librarian).
+      responses:
+        '200':
+          description: The title.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Title' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Catalogue]
+      operationId: updateTitle
+      summary: Change a title's title, author or publication year (librarian; REQ-BOOK-003).
+      description: The ISBN cannot be changed; a differing isbn is refused with ISBN_IMMUTABLE.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TitleChanges' }
+      responses:
+        '200':
+          description: The updated title.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Title' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /v1/titles/{isbn}/copies:
+    parameters:
+      - { name: isbn, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [Catalogue]
+      operationId: addCopy
+      summary: Add a physical copy to a title (librarian; REQ-BOOK-002).
+      description: Supply a barcode, or omit it and one is assigned. Barcodes are unique across the library, removed copies included.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NewCopy' }
+      responses:
+        '201':
+          description: The new copy.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Copy' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: BARCODE_IN_USE
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /v1/copies/{barcode}:
+    parameters:
+      - { name: barcode, in: path, required: true, schema: { type: string } }
+    delete:
+      tags: [Catalogue]
+      operationId: removeCopy
+      summary: Remove a copy from the catalogue (librarian; REQ-BOOK-004).
+      responses:
+        '204': { description: Removed. }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: COPY_ON_LOAN
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+components:
+  securitySchemes:
+    session:
+      type: http
+      scheme: bearer
+      description: The token from POST /v1/sessions. Expires after 30 days without use (SESSION_EXPIRED); ends at sign-out (SESSION_INVALID).
+  schemas:
+    Role:
+      type: string
+      enum: [member, librarian, administrator]
+    User:
+      type: object
+      required: [userId, email, role]
+      description: A user. Never carries a password or its hash (REQ-AUTH-002).
+      properties:
+        userId: { type: string, format: uuid }
+        email: { type: string }
+        role: { $ref: '#/components/schemas/Role' }
+    Member:
+      type: object
+      required: [userId, email]
+      properties:
+        userId: { type: string, format: uuid }
+        email: { type: string }
+    Loan:
+      type: object
+      required: [barcode, isbn, title, member, checkedOutOn, dueOn, returnedOn, returnedLate, overdue]
+      properties:
+        barcode: { type: string }
+        isbn: { type: string }
+        title: { type: string }
+        member: { $ref: '#/components/schemas/Member' }
+        checkedOutOn: { type: string, format: date }
+        dueOn: { type: string, format: date, description: 21 days after checkedOutOn. }
+        returnedOn:
+          type: [string, 'null']
+          format: date
+        returnedLate: { type: boolean, description: Returned after dueOn. }
+        overdue: { type: boolean, description: Not returned, and today is after dueOn. }
+    Credentials:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string }
+        password: { type: string, format: password }
+    Session:
+      type: object
+      required: [token, user]
+      properties:
+        token: { type: string }
+        user: { $ref: '#/components/schemas/User' }
+    Error:
+      type: object
+      required: [error, message]
+      properties:
+        error:
+          type: string
+          description: Stable machine-readable code, e.g. FIELD_REQUIRED, ISBN_ALREADY_EXISTS, FORBIDDEN.
+        message: { type: string }
+        field:
+          type: [string, 'null']
+          description: The request field the error concerns, where there is one.
+    NewTitle:
+      type: object
+      required: [isbn, title, author, publicationYear]
+      properties:
+        isbn: { type: string, description: ISBN-10 or ISBN-13; hyphens and spaces are ignored. }
+        title: { type: string, minLength: 1 }
+        author: { type: string, minLength: 1 }
+        publicationYear: { type: integer }
+    TitleChanges:
+      type: object
+      properties:
+        isbn: { type: string, description: Accepted only when equal to the current ISBN. }
+        title: { type: string, minLength: 1 }
+        author: { type: string, minLength: 1 }
+        publicationYear: { type: integer }
+    NewCopy:
+      type: object
+      properties:
+        barcode: { type: string, minLength: 1 }
+    Copy:
+      type: object
+      required: [barcode, onLoan]
+      properties:
+        barcode: { type: string }
+        onLoan: { type: boolean }
+    TitleSummary:
+      type: object
+      required: [isbn, title, author, publicationYear, copyCount, availableCopies, available]
+      properties:
+        isbn: { type: string }
+        title: { type: string }
+        author: { type: string }
+        publicationYear: { type: integer }
+        copyCount: { type: integer, description: Copies in the catalogue. }
+        availableCopies: { type: integer, description: Copies on the shelf (not on loan). }
+        available: { type: boolean, description: True when at least one copy is on the shelf. }
+    Title:
+      allOf:
+        - $ref: '#/components/schemas/TitleSummary'
+        - type: object
+          required: [copies]
+          properties:
+            copies:
+              type: array
+              items: { $ref: '#/components/schemas/Copy' }
+    SearchPage:
+      type: object
+      required: [items, total, page, pageSize]
+      properties:
+        items:
+          type: array
+          maxItems: 50
+          items: { $ref: '#/components/schemas/TitleSummary' }
+        total: { type: integer }
+        page: { type: integer }
+        pageSize: { type: integer, const: 50 }
+  responses:
+    BadRequest:
+      description: FIELD_REQUIRED, INVALID_FIELD, INVALID_REQUEST or ISBN_IMMUTABLE.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    InvalidSearch:
+      description: INVALID_SEARCH
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthenticated:
+      description: UNAUTHENTICATED (no credential), SESSION_INVALID (unknown or signed-out session) or SESSION_EXPIRED (idle 30 days).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: FORBIDDEN — the caller's role does not permit the operation.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: TITLE_NOT_FOUND or COPY_NOT_FOUND
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }

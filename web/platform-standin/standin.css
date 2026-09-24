@@ -1,0 +1,163 @@
+/* Stand-in styling for the platform primitives (QUESTIONS.md Q-STD-01). */
+@import url("https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap");
+
+:root {
+  --bookcloth: #1e4d40;
+  --bookcloth-deep: #163a30;
+  --brass: #c9a227;
+  --paper: #f7f8f6;
+  --ink: #1b2420;
+  --rule: #d3d8d5;
+  --font: "Atkinson Hyperlegible", system-ui, sans-serif;
+  color-scheme: light;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 1rem/1.5 var(--font);
+}
+
+main {
+  max-width: 60rem;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 3rem;
+}
+
+:focus-visible {
+  outline: 3px solid var(--brass);
+  outline-offset: 2px;
+}
+
+/* ---- Menu ---------------------------------------------------------------- */
+
+.menu {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 0 1.5rem;
+  padding: 0 1rem;
+  background: var(--bookcloth);
+  color: #fff;
+}
+
+.menu a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.menu-home {
+  display: flex;
+  align-items: center;
+  font-weight: 700;
+  font-size: 1.125rem;
+  padding: 0.875rem 0;
+}
+
+.menu-items {
+  display: flex;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.menu-items a {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  padding: 0 0.75rem;
+  /* the bookmark ribbon: a thick brass edge under the page being shown */
+  border-bottom: 4px solid transparent;
+  border-top: 4px solid transparent;
+}
+
+.menu-items a:hover {
+  background: var(--bookcloth-deep);
+}
+
+.menu-items a[aria-current="page"] {
+  border-bottom-color: var(--brass);
+  font-weight: 700;
+}
+
+.menu-end {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-left: auto;
+  font-size: 0.9375rem;
+}
+
+.menu-end p {
+  margin: 0;
+  opacity: 0.9;
+}
+
+.menu button {
+  font: inherit;
+  color: #fff;
+  background: transparent;
+  border: 1px solid rgb(255 255 255 / 0.6);
+  border-radius: 4px;
+  padding: 0.25rem 0.75rem;
+  cursor: pointer;
+}
+
+.menu button:hover {
+  background: var(--bookcloth-deep);
+}
+
+.menu-toggle {
+  display: none;
+}
+
+@media (max-width: 48rem) {
+  .menu {
+    gap: 0;
+  }
+
+  .menu-toggle {
+    display: block;
+    margin: auto 0 auto auto;
+  }
+
+  .menu-items,
+  .menu-end {
+    display: none;
+    flex-basis: 100%;
+  }
+
+  .menu-items[data-open="true"] {
+    display: flex;
+    flex-direction: column;
+    padding-bottom: 0.5rem;
+  }
+
+  .menu-items a {
+    padding: 0.625rem 0.75rem;
+    border-top: 0;
+    border-bottom: 0;
+    border-left: 4px solid transparent;
+  }
+
+  .menu-items a[aria-current="page"] {
+    border-left-color: var(--brass);
+  }
+
+  .menu-end[data-open="true"] {
+    display: flex;
+    justify-content: space-between;
+    margin: 0;
+    padding: 0.75rem 0;
+    border-top: 1px solid rgb(255 255 255 / 0.25);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .menu-items a,
+  .menu button {
+    transition: background-color 120ms ease-out;
+  }
+}
